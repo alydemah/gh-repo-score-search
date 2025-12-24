@@ -5,6 +5,7 @@ const config: Config = {
   testEnvironment: "node",
   testMatch: ["**/*.test.ts"],
   roots: ["<rootDir>/src"],
+  verbose: true,
 };
 
 export default config;

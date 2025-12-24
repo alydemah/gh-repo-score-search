@@ -1,35 +1,52 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { GitHubService } from '../services/github.service';
+import { calculateScore } from '../services/scoring.service';
+import { parseDate, parseNumber, ValidationError } from '../utils/validation';
 
+// GitHub Search API hard limit: only first 1000 results are accessible
 const MAX_GITHUB_RESULTS = 1000;
 
+/**
+ * Creates the repositories search router.
+ * Dependencies are injected to keep the route testable and decoupled.
+ */
 export function createRepositoriesRouter(githubService: GitHubService) {
   const router = Router();
 
+  /**
+   * GET /repositories
+   * Searches GitHub repositories, applies scoring, and returns ranked results.
+   */
   router.get('/repositories', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // Extract and normalize query parameters using validation utils
       const language = req.query.language as string | undefined;
+      let createdAfter: Date | undefined;
+      try {
+        createdAfter = parseDate(req.query.createdAfter as string | undefined);
+      } catch (err) {
+        return next(err);
+      }
 
-      const createdAfter = req.query.createdAfter
-        ? new Date(req.query.createdAfter as string)
-        : undefined;
-
-      const page = req.query.page ? Number(req.query.page) : 1;
-      const perPage = req.query.perPage ? Number(req.query.perPage) : 30;
+      let page: number;
+      let perPage: number;
+      try {
+        page = parseNumber(req.query.page, 1, { min: 1 });
+        perPage = parseNumber(req.query.perPage, 30, { min: 1, max: 100 });
+      } catch (err) {
+        return next(err);
+      }
 
       const sort = req.query.sort as string | undefined;
       const order = req.query.order as 'asc' | 'desc' | undefined;
 
+      // Enforce GitHub Search API pagination limits
       const offset = (page - 1) * perPage;
-
-      // GitHub Search API only allows access to the first 1000 results
       if (offset >= MAX_GITHUB_RESULTS) {
-        return res.status(400).json({
-          error:
-            'GitHub Search API only allows access to the first 1000 results. Please reduce page or perPage.',
-        });
+        return next(new ValidationError('GitHub Search API only allows access to the first 1000 results. Please reduce page or perPage.'));
       }
 
+      // Fetch repositories from GitHub
       const result = await githubService.searchRepositories({
         language,
         createdAfter,
@@ -39,13 +56,37 @@ export function createRepositoriesRouter(githubService: GitHubService) {
         order,
       });
 
+      // Apply scoring algorithm to each repository
+      // TODO: Include scoring breakdown per signal in the API response for better transparency
+      const scored = result.items.map((repo) => {
+        const score = calculateScore({
+          stars: repo.stargazers_count,
+          forks: repo.forks_count,
+          updatedAt: new Date(repo.updated_at),
+        });
+
+        return {
+          name: repo.name,
+          fullName: repo.full_name,
+          stars: repo.stargazers_count,
+          forks: repo.forks_count,
+          updatedAt: repo.updated_at,
+          score,
+          html_url: repo.html_url,
+        };
+      });
+
+      // Sort results by computed score (descending)
+      scored.sort((a, b) => b.score - a.score);
+
+      // Return paginated response
       res.json({
         meta: {
           total: result.total_count,
           page,
           perPage,
         },
-        data: result.items,
+        data: scored,
       });
     } catch (err) {
       next(err);

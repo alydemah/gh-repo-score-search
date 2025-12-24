@@ -1,28 +1,28 @@
-
-
-export interface GitHubRepository {
-  name: string;
-  full_name: string;
-  stargazers_count: number;
-  forks_count: number;
-  updated_at: string;
-}
-
-interface GitHubSearchResponse {
-  total_count: number;
-  items: GitHubRepository[];
-}
+import { GitHubSearchResponse } from '../types/app.types';
 
 /**
- * Service to interact with GitHub API
- * Ref: https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#search-repositories
- * 
-*/
+ * Service responsible for querying the GitHub Search API.
+ *
+ * - Encapsulates request construction and authentication
+ * - Applies sensible defaults for pagination and sorting
+ * - Throws on non-success responses to allow centralized error handling
+ *
+ * GitHub API reference:
+ * https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#search-repositories
+ */
 export class GitHubService {
   private readonly baseUrl = 'https://api.github.com/search/repositories';
 
   constructor(private readonly token?: string) {}
 
+  /**
+   * Searches public GitHub repositories using the Search API.
+   *
+   * Notes:
+   * - Pagination is limited by GitHub to the first 1000 results
+   * - Sorting and ordering are delegated to GitHub
+   * - Authentication is optional but strongly recommended to avoid rate limits
+   */
   async searchRepositories(params: {
     language?: string;
     createdAfter?: Date;
@@ -31,6 +31,7 @@ export class GitHubService {
     sort?: string;
     order?: 'asc' | 'desc';
   }): Promise<GitHubSearchResponse> {
+    // Apply defaults to keep API usage predictable
     const page = params.page ?? 1;
     const perPage = params.perPage ?? 30;
     const queryParts: string[] = [];
@@ -42,10 +43,12 @@ export class GitHubService {
     }
 
     if (params.createdAfter) {
+      // GitHub expects YYYY-MM-DD format
       queryParts.push(`created:>=${params.createdAfter.toISOString().split('T')[0]}`);
     }
 
-    const query = queryParts.join(' ');
+    // Fallback ensures GitHub Search API always receives a valid query
+    const query = queryParts.join(' ') || 'stars:>0';
 
     const url = new URL(this.baseUrl);
     url.searchParams.set('q', query || 'stars:>0');
@@ -63,6 +66,7 @@ export class GitHubService {
       },
     });
 
+    // Fail fast and surface meaningful errors to the caller
     if (!res.ok) {
       throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
     }
