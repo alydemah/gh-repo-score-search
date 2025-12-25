@@ -1,4 +1,6 @@
 import { GitHubSearchResponse } from '../types/app.types';
+import { logger } from '../utils/logger';
+
 
 /**
  * Service responsible for querying the GitHub Search API.
@@ -68,7 +70,8 @@ export class GitHubService {
 
     // Fail fast and surface meaningful errors to the caller
     if (!res.ok) {
-      throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
+     logger.error(`GitHub API error: ${res.status} ${res.statusText}`, { status: res.status });
+     throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
     }
 
     return (await res.json()) as GitHubSearchResponse;

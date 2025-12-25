@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { GitHubService } from '../services/github.service';
 import { calculateScore } from '../services/scoring.service';
 import { parseDate, parseNumber, ValidationError } from '../utils/validation';
+import { logger } from '../utils/logger';
 
 // GitHub Search API hard limit: only first 1000 results are accessible
 const MAX_GITHUB_RESULTS = 1000;
@@ -18,7 +19,9 @@ export function createRepositoriesRouter(githubService: GitHubService) {
    * Searches GitHub repositories, applies scoring, and returns ranked results.
    */
   router.get('/repositories', async (req: Request, res: Response, next: NextFunction) => {
+    const startTime = Date.now(); // ⏱ start timing
     try {
+      logger.info(`Received request: ${req.method} ${req.originalUrl}`);
       // Extract and normalize query parameters using validation utils
       const language = req.query.language as string | undefined;
       let createdAfter: Date | undefined;
@@ -43,8 +46,15 @@ export function createRepositoriesRouter(githubService: GitHubService) {
       // Enforce GitHub Search API pagination limits
       const offset = (page - 1) * perPage;
       if (offset >= MAX_GITHUB_RESULTS) {
-        return next(new ValidationError('GitHub Search API only allows access to the first 1000 results. Please reduce page or perPage.'));
+        return next(
+          new ValidationError(
+            'GitHub Search API only allows access to the first 1000 results. Please reduce page or perPage.'
+          )
+        );
       }
+      logger.info(
+        `Fetching repositories with language=${language}, createdAfter=${createdAfter}, page=${page}, perPage=${perPage}, sort=${sort}, order=${order}`
+      );
 
       // Fetch repositories from GitHub
       const result = await githubService.searchRepositories({
@@ -79,6 +89,8 @@ export function createRepositoriesRouter(githubService: GitHubService) {
       // Sort results by computed score (descending)
       scored.sort((a, b) => b.score - a.score);
 
+      logger.info(`Returning ${scored.length} repositories (page=${page}, perPage=${perPage})`);
+
       // Return paginated response
       res.json({
         meta: {
@@ -88,6 +100,9 @@ export function createRepositoriesRouter(githubService: GitHubService) {
         },
         data: scored,
       });
+      logger.info(
+        `Request completed in ${Date.now() - startTime}ms (returned ${scored.length} repos)`
+      );
     } catch (err) {
       next(err);
     }
